@@ -2,6 +2,7 @@ Handy AWS tools from Jim Browne and 42Lines
 ===========================================
 
 * server-certificate-check - Check server certificates in IAM for expiration and other issues.  Example output:
+
 ```
 Certificate subject is C=US, ST=California, L=San Francisco, O=Example Corporation, OU=IT, CN=page.example.com
 + 508 days left before expiration (2013-10-26 23:59:59+00:00)
