@@ -1,0 +1,125 @@
+#!/usr/bin/python
+#
+# Copyright 2012, 42Lines, Inc.
+# Original Author: Jim Browne
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import boto
+import pytz
+from datetime import datetime
+from M2Crypto import X509
+from optparse import OptionParser
+
+VERSION = "1.0"
+usage = """%prog [options]
+
+Check all server certificates in Amazon's IAM service.  Check:
+    - that key length is >= 2048 bits
+    - that the certificate is not expired
+    - that the certificate issuer matches the subject of the first
+          certificate in the certificate chain
+"""
+
+
+def check_certificate(name, quiet=False):
+
+    certinfo = iam.get_server_certificate(name)
+    response = certinfo[u'get_server_certificate_response']
+    result = response[u'get_server_certificate_result']
+    certificate = result[u'server_certificate']
+
+    body = certificate[u'certificate_body']
+    cert = X509.load_cert_string(str(body))
+    if not quiet:
+        print "Certificate subject is %s" % cert.get_subject().as_text()
+
+    if cert.get_pubkey().size() < 256:
+        print "- Key length less than 2048 bits!"
+
+    not_after = cert.get_not_after().get_datetime()
+    utcnow = datetime.utcnow()
+    utcnow = utcnow.replace(tzinfo=pytz.utc)
+    if utcnow > not_after:
+        print "- Certificate is expired! %s" % not_after
+    elif not quiet:
+        left = not_after - utcnow
+        print "+ %d days left before expiration (%s)" % (left.days, not_after)
+
+    chain = certificate[u'certificate_chain']
+    chaincert = X509.load_cert_string(str(chain))
+    subject = chaincert.get_subject().as_text()
+    if not quiet:
+        print "Chain certificate subject is %s" % subject
+
+    if cert.get_issuer().as_text() == chaincert.get_subject().as_text():
+        print "+ Certificate issuer matches chain subject"
+
+if __name__ == '__main__':
+    import sys
+
+    # IAM server certificate support appeared in Boto 2.0
+    try:
+        if boto.__version__ < 2.0:
+            print 'Boto version 2.0 or later is required'
+            print 'Try: sudo easy_install boto'
+            sys.exit(-1)
+    except AttributeError:
+        print 'Boto version 2.0 or later is required'
+        print 'Try: sudo easy_install boto'
+        sys.exit(-1)
+
+    parser = OptionParser(version=VERSION, usage=usage)
+    parser.add_option("--include",
+                      help="Test specified certificate, instead of all. " +
+                      "(May be repeated.)", action="append",
+                      type="string", dest="include")
+    parser.add_option("--list",
+                      help="List certificates", action="store_true",
+                      dest="list")
+    parser.add_option("--quiet", help="Only print test results",
+                      action="store_true", dest="quiet")
+
+    (options, args) = parser.parse_args()
+
+    quiet = options.quiet
+
+    iam = boto.connect_iam()
+
+    certs = iam.get_all_server_certs()
+    response = certs['list_server_certificates_response']
+    result = response[u'list_server_certificates_result']
+    certlist = result['server_certificate_metadata_list']
+
+    allcerts = []
+    for cert in certlist:
+        allcerts.append(cert[u'server_certificate_name'])
+
+    if options.list:
+        print '\n'.join(allcerts)
+        sys.exit(0)
+
+    if options.include:
+        for cert in options.include:
+            if cert not in allcerts:
+                print 'Certificate %s not found.' % cert
+                sys.exit(-1)
+        check = options.include
+    else:
+        check = allcerts
+        if options.quiet:
+            print "WARNING: checking all certs with --quiet can be confusing"
+
+    for cert in check:
+        check_certificate(cert, quiet)
+        print
