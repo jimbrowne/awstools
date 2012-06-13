@@ -1,0 +1,125 @@
+#!/usr/bin/python
+
+# Copyright 2012, 42Lines, Inc.
+# Original Author: Jim Browne
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import boto
+from boto.ec2 import regions
+from optparse import OptionParser
+
+VERSION = "1.0"
+usage = """%prog [options]
+
+Check for unused elastic IPs in all EC2 regions.  Optionally report on
+in-use elastic IPs.
+
+"""
+
+
+def elastic_ip_compare(options, accounts=None):
+    """
+    Will check for unallocated elastic IPs in all EC2 regions for all
+    of the accounts supplied.
+
+    :type accounts: dict
+    :param accounts: A dictionary contain account information.  The key is
+                     a string identifying the account (e.g. "dev") and the
+                     value is a tuple or list containing the access key
+                     and secret key, in that order.
+                     If this value is None, the credentials in the boto
+                     config will be used.
+    """
+    if not accounts:
+        creds = (boto.config.get('Credentials', 'aws_access_key_id'),
+                 boto.config.get('Credentials', 'aws_secret_access_key'))
+        accounts = {'main': creds}
+
+    for account_name in accounts:
+        ufmt = "Account {0} Region {1} unused elastic IPs:"
+        ifmt = "Account {0} Region {1} in-use elastic IPs:"
+
+        if options.trace:
+            print "Scanning account {0}".format(account_name)
+
+        ak, sk = accounts[account_name]
+
+        for region in boto.ec2.regions():
+            if options.trace:
+                print "  Scanning region {0}".format(region.name)
+
+            uheader = ufmt.format(account_name, region.name)
+            iheader = ifmt.format(account_name, region.name)
+
+            conn = region.connect(aws_access_key_id=ak,
+                                  aws_secret_access_key=sk)
+
+            elasticips = conn.get_all_addresses()
+
+            unused = [ip.public_ip for ip in elasticips if not ip.instance_id]
+            if unused:
+                if not options.quiet:
+                    print uheader
+                print '\n'.join(unused)
+
+            inuse = [ip for ip in elasticips if ip.instance_id]
+            if inuse and options.used:
+                if not options.quiet:
+                    print iheader
+                for ip in inuse:
+                    output = "{0} Instance {1}".format(ip.public_ip,
+                                                       ip.instance_id)
+                    if options.itag:
+                        value = ''
+
+                        iids = [ip.instance_id]
+                        resvs = conn.get_all_instances(instance_ids=iids)
+                        for r in resvs:
+                            for i in r.instances:
+                                if i.id == ip.instance_id:
+                                    value = i.tags.get(options.itag, '')
+                                    break
+
+                        if value:
+                            output += " ({0:.32})".format(value)
+
+                    print output
+
+
+if __name__ == '__main__':
+    import sys
+
+    parser = OptionParser(version=VERSION, usage=usage)
+    parser.add_option("--quiet",
+                      help="Only print IPs, no headers",
+                      action="store_true", dest="quiet")
+    parser.add_option("--used",
+                      help="Print in-use IPs as well",
+                      action="store_true", dest="used")
+    parser.add_option("--itag",
+                      help="Print specified tag for each instance",
+                      dest="itag")
+    parser.add_option("--debug",
+                      help="Emit copious information to aid script debugging",
+                      action="store_true", dest="debug")
+    parser.add_option("--trace",
+                      help="Trace execution steps",
+                      action="store_true", dest="trace")
+
+    (options, args) = parser.parse_args()
+
+    if options.debug:
+        options.trace = 1
+
+    elastic_ip_compare(options)

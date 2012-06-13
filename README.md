@@ -1,4 +1,4 @@
-Handy AWS tools from Jim Browne and 42Lines
+Handy AWS tools from Jim Browne and [42Lines](http://www.42lines.net)
 ===========================================
 
 * server-certificate-check - Check server certificates in IAM for expiration and other issues.  Example output:
@@ -71,4 +71,18 @@ Zone: us-east-1b
     Reservations:
       count 21 start 2011-09-19T21:58 duration 365 elapsed 267 left 98
 
+```
+
+* elastic-ip-check - Check for unused elastic IPs in all EC2 regions.  Optionally report on in-use elastic IPs.  Example output:
+
+```
+jbrowne@foo:~/awstools$ ./elastic-ip-check --used --itag=hostname
+Account main Region us-east-1 in-use elastic IPs:
+75.110.109.42 Instance i-deadbeef (bonham.example.com)
+174.219.210.19 Instance i-f00dbaad (page.example.com)
+
+jbrowne@foo:~/awstools$ ./elastic-ip-check
+Account main Region us-east-1 unused elastic IPs:
+107.20.114.174
+107.20.109.42
 ```
