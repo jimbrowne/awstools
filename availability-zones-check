@@ -54,7 +54,13 @@ class AvailabilityZonesCheck(Plugin):
         for r in regs:
             self.regioncheck(r)
 
-        return Response(pynagios.WARNING, ", ".join(self.responses))
+        if len(self.responses):
+            result = Response(pynagios.WARNING, ", ".join(self.responses))
+        else:
+            names = [r.name for r in regs]
+            result = Response(pynagios.OK, "Checked regions: " +
+                              ", ".join(names))
+        return result
 
     def regioncheck(self, region):
 
