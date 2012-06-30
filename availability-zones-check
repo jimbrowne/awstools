@@ -15,9 +15,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# TODO: Support critical and warn thresholds as number of days until
-# not_before
-
 import pynagios
 from pynagios import Plugin, make_option, Response
 import boto
