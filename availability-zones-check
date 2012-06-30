@@ -1,0 +1,85 @@
+#!/usr/bin/env python
+#
+# Copyright 2012, 42Lines, Inc.
+# Original Author: Jim Browne
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# TODO: Support critical and warn thresholds as number of days until
+# not_before
+
+import pynagios
+from pynagios import Plugin, make_option, Response
+import boto
+from boto.ec2 import regions
+
+class AvailabilityZonesCheck(Plugin):
+    region = make_option("--region",
+                         help="Region to check (default: us-east-1)",
+                         default="us-east-1")
+    allregions = make_option("--all",
+                             help="Check all regions",
+                             action="store_true")
+
+    responses = []
+    message_field = 0
+
+    def check(self):
+        # Boto 2.2.2 and later has messages field in Zone
+        # Boto < 2.0 missing __version__, hence try/except
+        try:
+            if boto.__version__ >= '2.2.2':
+                self.message_field = 1
+        except AttributeError:
+            pass
+
+        if self.options.allregions:
+            regs = regions()
+        else:
+            for r in regions():
+                if r.name == self.options.region:
+                    regs = [r]
+                    break
+            else:
+                message = "Region %s not found." % self.options.region
+                return Response(pynagios.UNKNOWN, message)
+
+        for r in regs:
+            self.regioncheck(r)
+
+        return Response(pynagios.WARNING, ", ".join(self.responses))
+
+    def regioncheck(self, region):
+
+        ec2 = boto.connect_ec2(region=region)
+        zones = ec2.get_all_zones()
+
+	for zone in zones:
+            if self.options.verbosity:
+                debug = "name %s state %s" % (zone.name, zone.state)
+                if self.message_field:
+                    debug += " message %s" % ("; ".join(zone.messages))
+                print debug
+
+            if zone.state != 'available':
+                message = "%s:%s" % (region.name, zone.name)
+                message += " state %s" % (zone.state)
+                if self.message_field:
+                    message += " (\"%s\")" % ("; ".join(zone.messages))
+                self.responses.append(message)
+                    
+
+if __name__ == "__main__":
+
+    # Instantiate the plugin, check it, and then exit
+    AvailabilityZonesCheck().check().exit()

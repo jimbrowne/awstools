@@ -86,3 +86,27 @@ Account main Region us-east-1 unused elastic IPs:
 107.20.114.174
 107.20.109.42
 ```
+
+* availability-zones-check - NAGIOS plugin to WARN when availability zones are impaired
+
+First install pynagios and boto:
+```
+easy_install pynagios
+easy_install boto
+```
+
+Example output (boto < 2.2.2):
+```
+jbrowne@foo:~/awstools$ ./availability-zones-check
+WARN: us-east-1:us-east-1d state impaired
+jbrowne@foo:~/awstools$ echo $?
+1
+```
+
+Example output (boto >= 2.2.2):
+```
+jbrowne@foo:~/awstools$ ./availability-zones-check
+WARN: us-east-1:us-east-1d state impaired ("We are continuing to work to recover the remaining EC2 instances, EBS volumes and ELBs.")
+jbrowne@foo:~/awstools$ echo $?
+1
+```
