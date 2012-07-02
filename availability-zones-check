@@ -20,6 +20,7 @@ from pynagios import Plugin, make_option, Response
 import boto
 from boto.ec2 import regions
 
+
 class AvailabilityZonesCheck(Plugin):
     region = make_option("--region",
                          help="Region to check (default: us-east-1)",
@@ -67,7 +68,7 @@ class AvailabilityZonesCheck(Plugin):
         ec2 = boto.connect_ec2(region=region)
         zones = ec2.get_all_zones()
 
-	for zone in zones:
+        for zone in zones:
             if self.options.verbosity:
                 debug = "name %s state %s" % (zone.name, zone.state)
                 if self.message_field:
@@ -80,7 +81,7 @@ class AvailabilityZonesCheck(Plugin):
                 if self.message_field:
                     message += " (\"%s\")" % ("; ".join(zone.messages))
                 self.responses.append(message)
-                    
+
 
 if __name__ == "__main__":
 
