@@ -110,3 +110,9 @@ WARN: us-east-1:us-east-1d state impaired ("We are continuing to work to recover
 jbrowne@foo:~/awstools$ echo $?
 1
 ```
+
+* volume-status-check - NAGIOS plugin to WARN when volumes are impaired
+```
+jbrowne@foo:~/awstools$ ./volume-status-check
+WARN: vol-deadbeef:potential-data-inconsistency IO Enabled nb 2012-06-30T05:09:46.000Z, vol-abcd1234:potential-data-inconsistency IO Enabled nb 2012-06-30T10:13:22.000Z
+```
