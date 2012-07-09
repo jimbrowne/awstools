@@ -1,0 +1,139 @@
+#!/usr/bin/env python
+#
+# Copyright 2012, 42Lines, Inc.
+# Original Author: Jim Browne
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# TODO: Support critical and warn thresholds as number of days until
+#           not_before
+# TODO: Submit add_response, all_responses code to pynagios upstream
+
+import pynagios
+from pynagios import Plugin, make_option, Response
+import boto
+from boto.ec2 import regions
+
+
+class InstanceEventsCheck(Plugin):
+
+    responses = []
+
+    region = make_option("--region",
+                         help="Region to check (default: us-east-1)",
+                         default="us-east-1")
+    allregions = make_option("--all",
+                             help="Check all regions",
+                             action="store_true")
+    tags = make_option("--tags",
+                       help="Instance tags to fetch for each instance",
+                       action="append")
+
+    def add_response(self, response):
+        """
+        Add a Response object to be collated by all_responses
+        """
+        self.responses.append(response)
+
+    def all_responses(self, default=None):
+        """
+        Collate all Response objects added with add_response.  Return
+        a Response object with worst Status of the group and a message
+        consisting of the groups messages grouped and prefixed by their
+        status.
+
+        e.g. Response(worstStatus, "A, C WARN: K, L OK: X, Y, Z")
+        """
+        if not self.responses:
+            if default:
+                return default
+            else:
+                return Response(pynagios.OK)
+
+        self.responses.sort(reverse=True, key=lambda k: k.status.exit_code)
+
+        worst = self.responses[0]
+        status = worst.status
+        message = worst.message
+
+        laststatus = status
+
+        for resp in self.responses[1:]:
+            if laststatus is not resp.status:
+                message += ' ' + resp.status.name + ': ' + resp.message
+                laststatus = resp.status
+            else:
+                message += ', ' + resp.message
+
+        return Response(status, message)
+
+    def check(self):
+
+        if self.options.allregions:
+            regs = regions()
+        else:
+            for r in regions():
+                if r.name == self.options.region:
+                    regs = [r]
+                    break
+            else:
+                message = "Region %s not found." % self.options.region
+                return Response(pynagios.UNKNOWN, message)
+
+        for r in regs:
+            self.regioncheck(r)
+
+        names = [r.name for r in regs]
+        default = Response(pynagios.OK, "Checked regions: " +
+                          ", ".join(names))
+
+        return self.all_responses(default)
+
+    def regioncheck(self, region):
+
+        import re
+
+        ec2 = boto.connect_ec2(region=region)
+        reservations = ec2.get_all_instances()
+
+        instanceinfo = {}
+        events = {}
+        tags = self.options.tags if self.options.tags else []
+
+        # Collect the tag for every possible instance
+        for res in reservations:
+            for instance in res.instances:
+                iid = instance.id
+                instanceinfo[iid] = {}
+                for tag in tags:
+                    instanceinfo[iid][tag] = instance.tags.get(tag, '')
+                instanceinfo[iid]['dns'] = instance.public_dns_name
+
+        stats = ec2.get_all_instance_status()
+
+        for stat in stats:
+            if stat.events:
+                for event in stat.events:
+                    if re.match('^\[Completed\]', event.description):
+                        continue
+                    status = pynagios.WARNING
+                    message = stat.id
+                    message += ":%s %s" % (event.code, event.description)
+                    message += " nb %s" % (event.not_before)
+                    for tag in tags:
+                        message += " %s:%s" % (tag, instanceinfo[stat.id][tag])
+                    self.add_response(Response(status, message))
+
+if __name__ == "__main__":
+    # Instantiate the plugin, check it, and then exit
+    InstanceEventsCheck().check().exit()
