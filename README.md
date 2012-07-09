@@ -116,3 +116,9 @@ jbrowne@foo:~/awstools$ echo $?
 jbrowne@foo:~/awstools$ ./volume-status-check
 WARN: vol-deadbeef:potential-data-inconsistency IO Enabled nb 2012-06-30T05:09:46.000Z, vol-abcd1234:potential-data-inconsistency IO Enabled nb 2012-06-30T10:13:22.000Z
 ```
+
+* instance-events-check - NAGIOS plugin to WARN when instances have pending status events
+```
+jbrowne@foo:~/awstools$ ./instance-events-check
+WARN: i-b74ebad3:instance-stop The instance is running on degraded hardware nb 2012-06-19T00:00:00.000Z
+```
