@@ -31,7 +31,8 @@ class InstanceEventsCheck(Plugin):
 
     region = make_option("--region",
                          help="Region to check (default: us-east-1)",
-                         default="us-east-1")
+                         default=[],
+                         action="append")
     allregions = make_option("--all",
                              help="Check all regions",
                              action="store_true")
@@ -79,16 +80,21 @@ class InstanceEventsCheck(Plugin):
 
     def check(self):
 
+        if not self.options.region:
+            self.options.region = ["us-east-1"]
+
         if self.options.allregions:
             regs = regions()
         else:
-            for r in regions():
-                if r.name == self.options.region:
-                    regs = [r]
-                    break
-            else:
-                message = "Region %s not found." % self.options.region
-                return Response(pynagios.UNKNOWN, message)
+            regs = []
+            for ropt in self.options.region:
+                for r in regions():
+                    if r.name == ropt:
+                        regs.append(r)
+                        break
+                else:
+                    message = "Region %s not found." % ropt
+                    return Response(pynagios.UNKNOWN, message)
 
         for r in regs:
             self.regioncheck(r)
