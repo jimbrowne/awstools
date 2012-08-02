@@ -30,7 +30,8 @@ class VolumeEventsCheck(Plugin):
                              help="Check all regions",
                              action="store_true")
 
-    responses = []
+    warns = []
+    criticals = []
 
     def check(self):
         boto_old = 1
@@ -66,8 +67,15 @@ class VolumeEventsCheck(Plugin):
         for r in regs:
             self.regioncheck(r)
 
-        if len(self.responses):
-            result = Response(pynagios.WARNING, ", ".join(self.responses))
+        wmessages = ", ".join(self.warns)
+        cmessages = ", ".join(self.criticals)
+
+        if len(cmessages):
+            if len(wmessages):
+                cmessages += " WARNING: " + wmessages
+            result = Response(pynagios.CRITICAL, cmessages)
+        elif len(wmessages):
+            result = Response(pynagios.WARNING, wmessages)
         else:
             names = [r.name for r in regs]
             result = Response(pynagios.OK, "Checked regions: " +
@@ -87,6 +95,18 @@ class VolumeEventsCheck(Plugin):
         for stat in stats:
             if self.options.verbosity:
                 print "id %s status %s" % (stat.id, stat.volume_status)
+            attachinfo = None
+            if stat.events or stat.actions:
+                vstates = ec2.get_all_volumes(volume_ids=[stat.id])
+                for vol in vstates:
+                    if vol.id == stat.id:
+                        if vol.attachment_state() == 'attached':
+                            adata = vol.attach_data
+                            attachinfo = "(%s %s)" % (adata.instance_id,
+                                                      adata.device)
+                        break
+                if self.options.verbosity:
+                    print "id %s attached %s" % (stat.id, attachinfo)
             if stat.events:
                 for event in stat.events:
                     if self.options.verbosity:
@@ -94,7 +114,12 @@ class VolumeEventsCheck(Plugin):
                     message = stat.id
                     message += ":%s %s" % (event.type, event.description)
                     message += " nb %s" % (event.not_before)
-                    self.responses.append(message)
+                    message += " na %s" % (event.not_after)
+                    if attachinfo:
+                        message += " %s" % (attachinfo)
+                        self.criticals.append(message)
+                    else:
+                        self.warns.append(message)
             if stat.actions:
                 for action in stat.actions:
                     if self.options.verbosity:
@@ -102,7 +127,11 @@ class VolumeEventsCheck(Plugin):
                     message = stat.id
                     message += ":%s %s" % (action.type, action.description)
                     message += " code %s" % (action.code)
-                    self.responses.append(message)
+                    if attachinfo:
+                        message += " %s" % (attachinfo)
+                        self.criticals.append(message)
+                    else:
+                        self.warns.append(message)
 
 if __name__ == "__main__":
     # Instantiate the plugin, check it, and then exit
