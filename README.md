@@ -1,6 +1,27 @@
 Handy AWS tools from Jim Browne and [42Lines](http://www.42lines.net)
 ===========================================
 
+* tag-images-with-os - For each image in a region, create a tag (default "os") containing the name from the AMI used for the instance.  Example output:
+```
+jbrowne@foo:~$ ~/awstools/tag-images-with-os --trace
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-lucid-10.04-i386-server-20100827
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-lucid-10.04-amd64-server-20101228
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-maverick-10.10-i386-server-20101225
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-maverick-10.10-amd64-server-20101225
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-maverick-10.10-amd64-server-20101225
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-precise-12.04-amd64-server-20121026.1
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=ubuntu-precise-12.04-amd64-server-20121026.1
+Looking up AMI ami-xxxxxxxx for instance i-xxxxxxxx
+Tagging i-xxxxxxxx with os=Windows_Server-2008-R2_SP1-English-64Bit-Base-2012.10.10
+```
+
 * server-certificate-check - Check server certificates in IAM for expiration and other issues.  Example output:
 
 ```
