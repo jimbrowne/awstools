@@ -179,8 +179,12 @@ def check_reservation_use(options, running_instances, reserved_purchases):
         pur_acct = reserved_purchases[account_name]
         regions = sorted(list(set(inst_acct.keys() + pur_acct.keys())))
         for region_name in regions:
-            inst_reg = running_instances[account_name][region_name]
-            pur_reg = reserved_purchases[account_name][region_name]
+            inst_reg = {}
+            if region_name in running_instances[account_name]:
+                inst_reg = running_instances[account_name][region_name]
+            pur_reg = {}
+            if region_name in reserved_purchases[account_name]:
+                pur_reg = reserved_purchases[account_name][region_name]
             zones = sorted(set(inst_reg.keys() + pur_reg.keys()))
             for zone in zones:
                 if not options.quiet:
