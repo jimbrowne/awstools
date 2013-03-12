@@ -161,7 +161,7 @@ def check_zone_use(options, instances, purchases, where):
             output = ',\n      '.join(rstrings)
             print "    Reservations:\n      " + output
 
-        return advice
+    return advice
 
 
 def check_reservation_use(options, running_instances, reserved_purchases):
