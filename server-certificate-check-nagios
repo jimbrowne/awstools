@@ -1,0 +1,173 @@
+#!/usr/bin/env python
+#
+# Copyright 2013, 42Lines, Inc.
+# Original Author: Jim Browne
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import pynagios
+from pynagios import Plugin, make_option, Response
+import boto
+import pytz
+from datetime import datetime
+from M2Crypto import X509
+
+
+class ServerCertificateCheck(Plugin):
+    include = make_option("--include",
+                          help="Test specified certificate, instead of all. " +
+                          "(May be repeated.)", action="append")
+    elbs = make_option("--elbs",
+                       help="Test only certificates in use by ELBs",
+                       action="store_true")
+
+    criticals = []
+    warnings = []
+    messages = []
+
+    def check(self):
+        # IAM server certificate support appeared in Boto 2.0
+        try:
+            if boto.__version__ <= '2.0':
+                raise AttributeError
+        except AttributeError:
+            return Response(pynagios.UNKNOWN, 'Boto version earlier than 2.0')
+
+        iam = boto.connect_iam()
+
+        certs = iam.get_all_server_certs()
+        response = certs['list_server_certificates_response']
+        result = response[u'list_server_certificates_result']
+        certlist = result['server_certificate_metadata_list']
+
+        allcerts = []
+        for cert in certlist:
+            allcerts.append(cert[u'server_certificate_name'])
+
+        if self.options.include:
+            for cert in self.options.include:
+                if cert not in allcerts:
+                    message = 'Certificate %s not found.' % cert
+                    return Response(pynagios.UNKNOWN, message)
+            check = self.options.include
+        elif self.options.elbs:
+            certs = set()
+            elb = boto.connect_elb()
+            if self.options.verbosity:
+                print "ELB certificate information"
+                print "ELB Name, ELB DNS Name, SSL Certificate ID"
+            for b in elb.get_all_load_balancers():
+                for l in b.listeners:
+                    if l.ssl_certificate_id:
+                        ssl_id = l.ssl_certificate_id
+                        if self.options.verbosity:
+                            print "%s %s %s" % (b.name, b.dns_name, ssl_id)
+                        # This assumes certificates are in the same account
+                        try:
+                            idx = ssl_id.index('server-certificate/')
+                            name = ssl_id[idx + len('server-certificate/'):]
+                            certs.add(name)
+                        except:
+                            pass
+            check = certs
+        else:
+            check = allcerts
+
+        for cert in check:
+            self.check_certificate(iam, cert)
+
+        message = ', '.join(self.messages)
+        result = Response(pynagios.OK, message)
+
+        message = ' OK: ' + message
+
+        if len(self.warnings):
+            message = ", ".join(self.warnings) + message
+            result = Response(pynagios.WARNING, message)
+            message = ' WARNING: ' + message
+
+        if len(self.criticals):
+            message = ", ".join(self.criticals) + message
+            result = Response(pynagios.CRITICAL, message)
+
+        return result
+
+    def check_certificate(self, iam, name):
+        """
+        Check all server certificates in Amazon's IAM service.  Check:
+        - that key length is >= 2048 bits
+        - that the certificate is not expired
+        - that the certificate issuer matches the subject of the first
+          certificate in the certificate chain
+        """
+
+        certinfo = iam.get_server_certificate(name)
+        response = certinfo[u'get_server_certificate_response']
+        result = response[u'get_server_certificate_result']
+        certificate = result[u'server_certificate']
+
+        body = certificate[u'certificate_body']
+        cert = X509.load_cert_string(str(body))
+        subject = cert.get_subject().as_text()
+        try:
+            cn = subject[subject.index('CN=') + 3:]
+        except:
+            cn = subject
+
+        if self.options.verbosity:
+            print "%s subject is %s" % (name, subject)
+            print "%s CN is %s" % (name, cn)
+
+        if cert.get_pubkey().size() < 256:
+            message = "%s Key length less than 2048 bits!" % cn
+            self.warnings.append(message)
+
+        not_after = cert.get_not_after().get_datetime()
+        not_after_str = not_after.strftime('(%Y-%m-%d)')
+        utcnow = datetime.utcnow()
+        utcnow = utcnow.replace(tzinfo=pytz.utc)
+
+        if utcnow > not_after:
+            message = "%s is expired! %s" % (cn, not_after_str)
+            self.criticals.append(message)
+        else:
+            left = not_after - utcnow
+            message = "%s %d days to expiration %s" % (cn,
+                                                       left.days,
+                                                       not_after_str)
+            if (left.days > 60):
+                self.messages.append(message)
+            else:
+                self.warnings.append(message)
+
+            if self.options.verbosity:
+                print message
+
+        chain = certificate[u'certificate_chain']
+        chaincert = X509.load_cert_string(str(chain))
+        subject = chaincert.get_subject().as_text()
+
+        if cert.get_issuer().as_text() == chaincert.get_subject().as_text():
+            if self.options.verbosity:
+                print "%s issuer matches chain subject" % cn
+        else:
+            message = "%s issuer does not match chain subject" % cn
+            message += " Issuer %s" % cert.get_issuer().as_text()
+            message += " Chain %s" % chaincert.get_subject().as_text()
+            self.warnings.append(message)
+
+
+if __name__ == "__main__":
+
+    # Instantiate the plugin, check it, and then exit
+    ServerCertificateCheck().check().exit()
