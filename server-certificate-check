@@ -64,6 +64,11 @@ def check_certificate(name, quiet=False):
 
     if cert.get_issuer().as_text() == chaincert.get_subject().as_text():
         print "+ Certificate issuer matches chain subject"
+    else:
+        print "- Certificate issuer does not match chain subject"
+        print "- Issuer %s" % cert.get_issuer().as_text()
+        print "- Chain subject %s" % chaincert.get_subject().as_text()
+
 
 if __name__ == '__main__':
     import sys
