@@ -130,7 +130,9 @@ class InstanceEventsCheck(Plugin):
         for stat in stats:
             if stat.events:
                 for event in stat.events:
-                    if re.match('^\[Completed\]', event.description):
+                    completed = re.match('^\[Completed\]', event.description)
+                    canceled = re.match('^\[Canceled\]', event.description)
+                    if completed or canceled:
                         continue
                     status = pynagios.WARNING
                     message = stat.id
