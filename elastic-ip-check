@@ -16,7 +16,6 @@
 # limitations under the License.
 
 import boto
-from boto.ec2 import regions
 from optparse import OptionParser
 
 VERSION = "1.0"
@@ -98,7 +97,6 @@ def elastic_ip_compare(options, accounts=None):
 
 
 if __name__ == '__main__':
-    import sys
 
     parser = OptionParser(version=VERSION, usage=usage)
     parser.add_option("--quiet",

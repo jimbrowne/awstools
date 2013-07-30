@@ -84,10 +84,7 @@ class VolumeEventsCheck(Plugin):
 
     def regioncheck(self, region):
 
-        import re
-
         ec2 = boto.connect_ec2(region=region)
-        reservations = ec2.get_all_instances()
         #vfilter = { 'volume-status.status' : 'impaired' }
         #stats = ec2.get_all_volume_status(filters=vfilter)
         stats = ec2.get_all_volume_status()
