@@ -113,7 +113,6 @@ class InstanceEventsCheck(Plugin):
         reservations = ec2.get_all_instances()
 
         instanceinfo = {}
-        events = {}
         tags = self.options.tags if self.options.tags else []
 
         # Collect the tag for every possible instance
