@@ -56,18 +56,21 @@ def check_certificate(name, quiet=False):
         left = not_after - utcnow
         print "+ %d days left before expiration (%s)" % (left.days, not_after)
 
-    chain = certificate[u'certificate_chain']
-    chaincert = X509.load_cert_string(str(chain))
-    subject = chaincert.get_subject().as_text()
-    if not quiet:
-        print "Chain certificate subject is %s" % subject
-
-    if cert.get_issuer().as_text() == chaincert.get_subject().as_text():
-        print "+ Certificate issuer matches chain subject"
+    if u'certificate_chain' not in certificate:
+        print "%s has no chain certificate" % cert.get_subject().as_text()
     else:
-        print "- Certificate issuer does not match chain subject"
-        print "- Issuer %s" % cert.get_issuer().as_text()
-        print "- Chain subject %s" % chaincert.get_subject().as_text()
+        chain = certificate[u'certificate_chain']
+        chaincert = X509.load_cert_string(str(chain))
+        chainsubject = chaincert.get_subject().as_text()
+        if not quiet:
+            print "Chain certificate subject is %s" % chainsubject
+
+        if cert.get_issuer().as_text() == chainsubject:
+            print "+ Certificate issuer matches chain subject"
+        else:
+            print "- Certificate issuer does not match chain subject"
+            print "- Issuer %s" % cert.get_issuer().as_text()
+            print "- Chain subject %s" % chainsubject
 
 
 if __name__ == '__main__':

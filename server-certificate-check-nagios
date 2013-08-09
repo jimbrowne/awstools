@@ -153,18 +153,21 @@ class ServerCertificateCheck(Plugin):
             if self.options.verbosity:
                 print message
 
-        chain = certificate[u'certificate_chain']
-        chaincert = X509.load_cert_string(str(chain))
-        subject = chaincert.get_subject().as_text()
-
-        if cert.get_issuer().as_text() == chaincert.get_subject().as_text():
-            if self.options.verbosity:
-                print "%s issuer matches chain subject" % cn
+        if u'certificate_chain' not in certificate:
+            self.warnings.append("%s has no chain certificate" % cn)
         else:
-            message = "%s issuer does not match chain subject" % cn
-            message += " Issuer %s" % cert.get_issuer().as_text()
-            message += " Chain %s" % chaincert.get_subject().as_text()
-            self.warnings.append(message)
+            chain = certificate[u'certificate_chain']
+            chaincert = X509.load_cert_string(str(chain))
+            chainsubject = chaincert.get_subject().as_text()
+
+            if cert.get_issuer().as_text() == chainsubject:
+                if self.options.verbosity:
+                    print "%s issuer matches chain subject" % cn
+            else:
+                message = "%s issuer does not match chain subject" % cn
+                message += " Issuer %s" % cert.get_issuer().as_text()
+                message += " Chain %s" % chainsubject
+                self.warnings.append(message)
 
 
 if __name__ == "__main__":
