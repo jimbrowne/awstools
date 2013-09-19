@@ -30,6 +30,9 @@ class ServerCertificateCheck(Plugin):
     elbs = make_option("--elbs",
                        help="Test only certificates in use by ELBs",
                        action="store_true")
+    threshold = make_option("--threshold",
+                          help="days to expiration less than which is a " +
+                          "warning. (Default: 60)", type="int", default=60)
 
     criticals = []
     warnings = []
@@ -84,7 +87,7 @@ class ServerCertificateCheck(Plugin):
             check = allcerts
 
         for cert in check:
-            self.check_certificate(iam, cert)
+            self.check_certificate(iam, cert, self.options.threshold)
 
         message = ', '.join(self.messages)
         result = Response(pynagios.OK, message)
@@ -102,7 +105,7 @@ class ServerCertificateCheck(Plugin):
 
         return result
 
-    def check_certificate(self, iam, name):
+    def check_certificate(self, iam, name, threshold):
         """
         Check all server certificates in Amazon's IAM service.  Check:
         - that key length is >= 2048 bits
@@ -145,7 +148,7 @@ class ServerCertificateCheck(Plugin):
             message = "%s %d days to expiration %s" % (cn,
                                                        left.days,
                                                        not_after_str)
-            if (left.days > 60):
+            if (left.days > threshold):
                 self.messages.append(message)
             else:
                 self.warnings.append(message)
