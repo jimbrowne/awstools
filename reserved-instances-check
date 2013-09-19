@@ -133,8 +133,8 @@ def check_zone_use(options, instances, purchases, where):
             suggest = sortcand[pur_count:]
 
             if suggest:
-                advfmt = '{0} candidate(s) for a reservation purchase in {1}\n'
-                advice += advfmt.format(len(suggest), where)
+                advfmt = '{0} candidate(s) for a {1} reservation purchase in {2}\n'
+                advice += advfmt.format(len(suggest), itype, where)
                 sstrings = [instance_string(s, options) for s in suggest]
                 advice += '\n'.join(sstrings)
                 advice += '\n\n'
