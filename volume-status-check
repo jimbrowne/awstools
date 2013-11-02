@@ -39,7 +39,8 @@ class VolumeEventsCheck(Plugin):
         # Boto 2.3.0 and later has volume status code
         # Boto < 2.0 missing __version__, hence try/except
         try:
-            if boto.__version__ >= '2.3.0':
+            from pkg_resources import parse_version
+            if parse_version(boto.__version__) >= parse_version('2.3.0'):
                 boto_old = 0
         except AttributeError:
             pass
