@@ -171,99 +171,92 @@ def check_reservation_use(options, running_instances, reserved_purchases):
 
     advice = ''
 
-    for account_name in running_instances:
-        if not options.quiet:
-            print 'Account: %s' % account_name
-            print
-        inst_acct = running_instances[account_name]
-        pur_acct = reserved_purchases[account_name]
-        regions = sorted(list(set(inst_acct.keys() + pur_acct.keys())))
-        for region_name in regions:
-            inst_reg = {}
-            if region_name in running_instances[account_name]:
-                inst_reg = running_instances[account_name][region_name]
+    inst_acct = running_instances
+    pur_acct = reserved_purchases
+    regions = sorted(list(set(inst_acct.keys() + pur_acct.keys())))
+    for region_name in regions:
+        inst_reg = {}
+        if region_name in running_instances:
+            inst_reg = running_instances[region_name]
             pur_reg = {}
-            if region_name in reserved_purchases[account_name]:
-                pur_reg = reserved_purchases[account_name][region_name]
-            zones = sorted(set(inst_reg.keys() + pur_reg.keys()))
-            for zone in zones:
-                if not options.quiet:
-                    print 'Zone: %s' % zone
-                inst_zone = {}
-                pur_zone = {}
-                if zone in inst_reg:
-                    inst_zone = inst_reg[zone]
-                if zone in pur_reg:
-                    pur_zone = pur_reg[zone]
-                wherefmt = 'account {0} region {1} zone {2}'
-                where = wherefmt.format(account_name, region_name, zone)
-                advice += check_zone_use(options, inst_zone, pur_zone, where)
-                if not options.quiet:
-                    print
+
+        if region_name in reserved_purchases:
+            pur_reg = reserved_purchases[region_name]
+
+        zones = sorted(set(inst_reg.keys() + pur_reg.keys()))
+        for zone in zones:
+            if not options.quiet:
+                print 'Zone: %s' % zone
+            inst_zone = {}
+            pur_zone = {}
+            if zone in inst_reg:
+                inst_zone = inst_reg[zone]
+            if zone in pur_reg:
+                pur_zone = pur_reg[zone]
+                
+            wherefmt = 'region {0} zone {1}'
+            where = wherefmt.format(region_name, zone)
+            advice += check_zone_use(options, inst_zone, pur_zone, where)
+            if not options.quiet:
+                print
+
     return advice
 
 
-def reserved_compare(options, accounts=None):
+def reserved_compare(options):
     """
     Will compare running instances to purchased reservations across
     all EC2 regions for all of the accounts supplied.
 
     :type accounts: dict
-    :param accounts: A dictionary contain account information.  The key is
-                     a string identifying the account (e.g. "dev") and the
-                     value is a tuple or list containing the access key
-                     and secret key, in that order.
-                     If this value is None, the credentials in the boto
-                     config will be used.
     """
-    if not accounts:
-        creds = (boto.config.get('Credentials', 'aws_access_key_id'),
-                 boto.config.get('Credentials', 'aws_secret_access_key'))
-        accounts = {'main': creds}
     running_instances = defaultdict(dict)
     reserved_purchases = defaultdict(dict)
-    for account_name in accounts:
+    regions = boto.ec2.regions()
+    good_regions = [r for r in regions if r.name not in ['us-gov-west-1',
+                                                         'cn-north-1']]
+    for region in good_regions:
         if options.trace:
-            print "Scanning account {0}".format(account_name)
-        ak, sk = accounts[account_name]
-        for region in boto.ec2.regions():
-            if options.trace:
-                print "  Scanning region {0}".format(region.name)
-            conn = region.connect(aws_access_key_id=ak,
-                                  aws_secret_access_key=sk)
-            filters = {'instance-state-name': 'running'}
-            zones = defaultdict(dict)
-            if options.trace:
-                print "    Fetching running instances"
-            reservations = conn.get_all_instances(filters=filters)
-            for reservation in reservations:
-                for inst in reservation.instances:
-                    if options.debug:
-                        print instance_string(inst, options, verbose=True)
-                    if inst.state != 'running':
-                        if options.debug:
-                            print "Skipp {0.id} state {0.state}".format(inst)
-                        continue
-                    if inst.instance_type not in zones[inst.placement]:
-                        zones[inst.placement][inst.instance_type] = []
-                    zones[inst.placement][inst.instance_type].append(inst)
-            if zones:
-                running_instances[account_name][region.name] = zones
-            purchased = defaultdict(dict)
-            if options.trace:
-                print "    Fetching reservations"
-            reserved = conn.get_all_reserved_instances()
-            for r in reserved:
+            print "  Scanning region {0}".format(region.name)
+        conn = region.connect()
+        filters = {'instance-state-name': 'running'}
+        zones = defaultdict(dict)
+
+        if options.trace:
+            print "    Fetching running instances"
+        reservations = conn.get_all_instances(filters=filters)
+        for reservation in reservations:
+            for inst in reservation.instances:
                 if options.debug:
-                    print reservation_string(r, verbose=True)
-                if r.state != 'active':
+                    print instance_string(inst, options, verbose=True)
+                if inst.state != 'running':
+                    if options.debug:
+                        print "Skipp {0.id} state {0.state}".format(inst)
                     continue
-                if r.instance_type not in purchased[r.availability_zone]:
-                    purchased[r.availability_zone][r.instance_type] = [r]
-                else:
-                    purchased[r.availability_zone][r.instance_type].append(r)
-            if purchased:
-                reserved_purchases[account_name][region.name] = purchased
+                if inst.instance_type not in zones[inst.placement]:
+                    zones[inst.placement][inst.instance_type] = []
+                zones[inst.placement][inst.instance_type].append(inst)
+
+        if zones:
+            running_instances[region.name] = zones
+            
+        purchased = defaultdict(dict)
+        if options.trace:
+            print "    Fetching reservations"
+
+        reserved = conn.get_all_reserved_instances()
+        for r in reserved:
+            if options.debug:
+                print reservation_string(r, verbose=True)
+            if r.state != 'active':
+                continue
+            if r.instance_type not in purchased[r.availability_zone]:
+                purchased[r.availability_zone][r.instance_type] = [r]
+            else:
+                purchased[r.availability_zone][r.instance_type].append(r)
+
+        if purchased:
+            reserved_purchases[region.name] = purchased
 
     return check_reservation_use(options, running_instances,
                                  reserved_purchases)
