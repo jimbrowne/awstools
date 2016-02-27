@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Copyright 2012, 42Lines, Inc.
+# Copyright 2012-6, 42Lines, Inc.
 # Original Author: Jim Browne
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,10 +15,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import pynagios
 from pynagios import Plugin, make_option, Response
 import boto
 from boto.ec2 import regions
+
+
+def ts_in_past(timestamp):
+    '''Return true if an AWS format timestamp is in the past.
+    Return false if not or it timestamp is unparseable.'''
+
+    try:
+        tstamp = datetime.datetime.strptime(timestamp,
+                                            '%Y-%m-%dT%H:%M:%S.%fZ')
+    except ValueError:
+        return False
+
+    tstamp_delta = datetime.datetime.utcnow() - tstamp
+    return tstamp_delta.total_seconds() > 0
 
 
 class VolumeEventsCheck(Plugin):
@@ -32,6 +47,7 @@ class VolumeEventsCheck(Plugin):
 
     warns = []
     criticals = []
+    infos = []
 
     def check(self):
         boto_old = 1
@@ -70,6 +86,7 @@ class VolumeEventsCheck(Plugin):
 
         wmessages = ", ".join(self.warns)
         cmessages = ", ".join(self.criticals)
+        infos = ", ".join(self.infos)
 
         if len(cmessages):
             if len(wmessages):
@@ -80,7 +97,7 @@ class VolumeEventsCheck(Plugin):
         else:
             names = [r.name for r in regs]
             result = Response(pynagios.OK, "Checked regions: " +
-                              ", ".join(names))
+                              ", ".join(names) + " OK: " + infos)
         return result
 
     def regioncheck(self, region):
@@ -113,7 +130,10 @@ class VolumeEventsCheck(Plugin):
                     message += ":%s %s" % (event.type, event.description)
                     message += " nb %s" % (event.not_before)
                     message += " na %s" % (event.not_after)
-                    if attachinfo:
+                    if ts_in_past(event.not_after):
+                        message += " %s" % (attachinfo)
+                        self.infos.append(message)
+                    elif attachinfo:
                         message += " %s" % (attachinfo)
                         self.criticals.append(message)
                     else:
