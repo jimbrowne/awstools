@@ -44,6 +44,7 @@ def instance_string(instance, options, verbose=False):
     if verbose:
         fmt = " region {0.region} placement {0.placement}"
         fmt += " type {0.instance_type} state {0.state}"
+        fmt += " platform {0.platform}"
         output += fmt.format(instance)
 
     output += " start {0.launch_time:.16}".format(instance)
@@ -237,7 +238,19 @@ def reserved_compare(options):
                     print instance_string(inst, options, verbose=True)
                 if inst.state != 'running':
                     if options.debug:
-                        print "Skipp {0.id} state {0.state}".format(inst)
+                        print "Skip {0.id} state {0.state}".format(inst)
+                    continue
+                if inst.spot_instance_request_id:
+                    if options.debug:
+                        print "Skip {0.id} has spot id {0.spot_instance_request_id}".format(inst)
+                    continue
+                if 'aws:autoscaling:groupName' in inst.tags:
+                    if options.debug:
+                        print "Skip {0.id} is an autoscale instance".format(inst)
+                    continue
+                if inst.platform == 'Windows' or inst.platform == 'windows':
+                    if options.debug:
+                        print "Skip {0.id} has platform {0.platform}".format(inst)
                     continue
                 if inst.instance_type not in zones[inst.placement]:
                     zones[inst.placement][inst.instance_type] = []
