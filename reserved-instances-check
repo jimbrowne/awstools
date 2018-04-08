@@ -256,6 +256,9 @@ def reserved_compare(options):
                 print reservation_string(r, verbose=True)
             if r.state != 'active':
                 continue
+            if r.instance_tenancy != 'default':
+                print 'WARNING: Non-default tenancy %s: %s' % (r.instance_tenancy, reservation_string(r))
+                continue
             if r.instance_type not in purchased[r.availability_zone]:
                 purchased[r.availability_zone][r.instance_type] = [r]
             else:
