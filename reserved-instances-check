@@ -22,14 +22,14 @@ from operator import attrgetter
 from optparse import OptionParser
 from datetime import datetime
 # apt-get install python-dateutil
-from dateutil.parser import *
-from dateutil.tz import *
-from dateutil.relativedelta import *
+from dateutil.parser import parse
+from dateutil.tz import tzutc
+from dateutil.relativedelta import relativedelta
 
 VERSION = "1.0"
 IMONTH = 3
 RDAYS = 15
-usage = """%prog [options]
+USAGE = """%prog [options]
 
 Compare purchased reserved instances against running instances and
 offer advice on current coverage.  Optionally report on running
@@ -116,7 +116,7 @@ def check_zone_use(options, instances, purchases, where):
 
         if delta < 0:
             advice += '{0} unused reservation(s) in {1}\n'.format(-1 * delta,
-                                                                   where)
+                                                                  where)
             advice += 'Use --rdetail to see reservation details\n'
             advice += '\n'
         elif delta > 0:
@@ -141,7 +141,7 @@ def check_zone_use(options, instances, purchases, where):
 
         if pur_count:
             expiring = [r for r in purchases[itype]
-                          if reservation_left(r) < options.rdays]
+                        if reservation_left(r) < options.rdays]
             if expiring:
                 advfmt = '{0} reservations(s) about to expire in {1}\n'
                 advice += advfmt.format(len(expiring), where)
@@ -193,7 +193,7 @@ def check_reservation_use(options, running_instances, reserved_purchases):
                 inst_zone = inst_reg[zone]
             if zone in pur_reg:
                 pur_zone = pur_reg[zone]
-                
+
             wherefmt = 'region {0} zone {1}'
             where = wherefmt.format(region_name, zone)
             advice += check_zone_use(options, inst_zone, pur_zone, where)
@@ -239,7 +239,7 @@ def reserved_compare(options):
 
         if zones:
             running_instances[region.name] = zones
-            
+
         purchased = defaultdict(dict)
         if options.trace:
             print "    Fetching reservations"
@@ -261,7 +261,8 @@ def reserved_compare(options):
     return check_reservation_use(options, running_instances,
                                  reserved_purchases)
 
-if __name__ == '__main__':
+
+def main():
     import sys
 
     # Need get_all_instance filter option starting with Boto 2.0
@@ -277,7 +278,7 @@ if __name__ == '__main__':
         print 'Try: sudo easy_install boto'
         sys.exit(-1)
 
-    parser = OptionParser(version=VERSION, usage=usage)
+    parser = OptionParser(version=VERSION, usage=USAGE)
     parser.add_option("--imonth",
                       help="Age in months before an instance is considered" +
                       " for a reservation (default %default)",
@@ -308,7 +309,7 @@ if __name__ == '__main__':
                       help="Trace execution steps",
                       action="store_true", dest="trace")
 
-    (options, args) = parser.parse_args()
+    (options, _) = parser.parse_args()
 
     if options.debug:
         options.trace = 1
@@ -319,3 +320,7 @@ if __name__ == '__main__':
     print "Advice based on current data:"
     print
     print advice
+
+
+if __name__ == '__main__':
+    main()
