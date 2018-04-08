@@ -62,9 +62,15 @@ def reservation_timing(reservation):
 
     elapsed = utcnow - start
     duration = int(reservation.duration) / (60 * 60 * 24)
-    left = duration - elapsed.days
 
-    return (duration, elapsed.days, left)
+    # Duration can not be used as a re-sold RI might have a later
+    # start date (when sold), but the duration dates back to the original
+    # purchase.
+    # left = duration - elapsed.days
+
+    left = parse(reservation.end) - utcnow
+
+    return (duration, elapsed.days, left.days + 1)
 
 
 def reservation_left(reservation):
