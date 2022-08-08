@@ -2,3 +2,4 @@
 *.pyc
 *.deb
 *.log
+.coverage

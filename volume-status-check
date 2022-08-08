@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2012-6, 42Lines, Inc.
+# Copyright 2012-2022, 42Lines, Inc.
 # Original Author: Jim Browne
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,11 +15,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from argparse import ArgumentParser
 import datetime
+
+import boto3
 import pynagios
-from pynagios import Plugin, make_option, Response
-import boto
-from boto.ec2 import regions
+from pynagios import Plugin, Response
 
 
 def ts_in_past(timestamp):
@@ -37,119 +38,124 @@ def ts_in_past(timestamp):
 
 
 class VolumeEventsCheck(Plugin):
-    region = make_option("--region",
-                         help="Region to check (default: us-east-1)",
-                         default=[],
-                         action="append")
-    allregions = make_option("--all",
-                             help="Check all regions",
-                             action="store_true")
+    parser = ArgumentParser(add_help=False)
+
+    parser.add_argument("--region",
+                        help="Region to check (default: us-east-1)",
+                        default=[],
+                        action="append")
+    parser.add_argument("--profile",
+                        help="AWS profile to use (default: none)",
+                        action="store")
+    parser.add_argument("--all",
+                        help="Check all regions",
+                        action="store_true")
 
     warns = []
     criticals = []
     infos = []
+    session = None
+    ec2_client = None
 
     def check(self):
-        boto_old = 1
-
-        # Boto 2.3.0 and later has volume status code
-        # Boto < 2.0 missing __version__, hence try/except
-        try:
-            from pkg_resources import parse_version
-            if parse_version(boto.__version__) >= parse_version('2.3.0'):
-                boto_old = 0
-        except AttributeError:
-            pass
-
-        if boto_old:
-            message = "Boto version too old.  Need 2.3.0 or later"
-            return Response(pynagios.UNKNOWN, message)
+        self.session = boto3.Session(profile_name=self.options.profile)
 
         if not self.options.region:
             self.options.region = ["us-east-1"]
 
-        if self.options.allregions:
-            regs = regions()
+        if self.options.all:
+            check_regions = self.session.get_available_regions('ec2')
         else:
-            regs = []
-            for ropt in self.options.region:
-                for r in regions():
-                    if r.name == ropt:
-                        regs.append(r)
+            check_regions = []
+            for option_region in self.options.region:
+                for aws_region in self.session.get_available_regions('ec2'):
+                    if aws_region == option_region:
+                        check_regions.append(aws_region)
                         break
                 else:
-                    message = "Region %s not found." % ropt
+                    message = "Region %s not found." % option_region
                     return Response(pynagios.UNKNOWN, message)
 
-        for r in regs:
-            self.regioncheck(r)
+        for check_region in check_regions:
+            # Create client here to facilitate testing
+            self.ec2_client = self.session.client('ec2', region_name=check_region)
+            self.regioncheck(check_region)
 
         wmessages = ", ".join(self.warns)
         cmessages = ", ".join(self.criticals)
         infos = ", ".join(self.infos)
 
-        if len(cmessages):
-            if len(wmessages):
+        if cmessages:
+            if wmessages:
                 cmessages += " WARNING: " + wmessages
             result = Response(pynagios.CRITICAL, cmessages)
-        elif len(wmessages):
+        elif wmessages:
             result = Response(pynagios.WARNING, wmessages)
         else:
-            names = [r.name for r in regs]
             result = Response(pynagios.OK, "Checked regions: " +
-                              ", ".join(names) + " OK: " + infos)
+                              ", ".join(check_regions) + " OK: " + infos)
         return result
 
     def regioncheck(self, region):
 
-        ec2 = boto.connect_ec2(region=region)
-        #vfilter = { 'volume-status.status' : 'impaired' }
-        #stats = ec2.get_all_volume_status(filters=vfilter)
-        stats = ec2.get_all_volume_status()
+        #vfilter = [{ 'Name': 'volume-status.status',  'Values' : 'impaired' }]
+        paginator = self.ec2_client.get_paginator('describe_volume_status')
 
-        for stat in stats:
-            if self.options.verbosity:
-                print "id %s status %s" % (stat.id, stat.volume_status)
-            attachinfo = None
-            if stat.events or stat.actions:
-                vstates = ec2.get_all_volumes(volume_ids=[stat.id])
-                for vol in vstates:
-                    if vol.id == stat.id:
-                        if vol.attachment_state() == 'attached':
-                            adata = vol.attach_data
-                            attachinfo = "(%s %s)" % (adata.instance_id,
-                                                      adata.device)
+        for statuses in paginator.paginate():
+            for stat in statuses['VolumeStatuses']:
+                self.process_volume_status(region, stat)
+
+    def process_volume_status(self, region, stat):
+        if self.options.verbosity:
+            print("id %s status %s" % (stat['VolumeId'], stat.volume_status))
+
+        attachinfo = None
+
+        if stat.get('Events', False) or stat.get('Actions', False):
+            vstates = self.ec2_client.describe_volumes(VolumeIds=[stat['VolumeId']])
+            for vol in vstates['Volumes']:
+                if vol['VolumeId'] == stat['VolumeId']:
+                    for attachment in  vol['Attachments']:
+                        if attachment['State'] == 'attached':
+                            attachinfo = "(%s %s)" % (attachment['InstanceId'],
+                                                      attachment['Device'])
                         break
-                if self.options.verbosity:
-                    print "id %s attached %s" % (stat.id, attachinfo)
-            if stat.events:
-                for event in stat.events:
-                    if self.options.verbosity:
-                        print event
-                    message = stat.id
-                    message += ":%s %s" % (event.type, event.description)
-                    message += " nb %s" % (event.not_before)
-                    message += " na %s" % (event.not_after)
-                    if ts_in_past(event.not_after):
-                        message += " %s" % (attachinfo)
-                        self.infos.append(message)
-                    elif attachinfo:
-                        message += " %s" % (attachinfo)
-                        self.criticals.append(message)
-                    else:
-                        self.warns.append(message)
-            if stat.actions:
-                for action in stat.actions:
-                    if self.options.verbosity:
-                        print action
-                    message = stat.id
-                    message += ":%s %s" % (action.type, action.description)
-                    message += " code %s" % (action.code)
-                    if attachinfo:
-                        message += " %s" % (attachinfo)
-                        self.criticals.append(message)
-                    else:
-                        self.warns.append(message)
+
+                if attachinfo:  # vstates loop
+                    break
+
+            if self.options.verbosity:
+                print("id %s attached %s" % (stat['VolumeId'], attachinfo))
+
+        for event in stat.get('Events', []):
+            if self.options.verbosity:
+                print(event)
+            message = "%s:%s" % (region, stat['VolumeId'])
+            message += ":%s %s" % (event['EventType'], event['Description'])
+            message += " nb %s" % (event['NotBefore'])
+            message += " na %s" % (event['NotAfter'])
+
+            if ts_in_past(event['NotAfter']):
+                message += " %s" % (attachinfo)
+                self.infos.append(message)
+            elif attachinfo:
+                message += " %s" % (attachinfo)
+                self.criticals.append(message)
+            else:
+                self.warns.append(message)
+
+        for action in stat.get('Actions', []):
+            if self.options.verbosity:
+                print(action)
+            message = "%s:%s" % (region, stat['VolumeId'])
+            message += ":%s %s" % (action['EventType'], action['Description'])
+            message += " code %s" % (action['Code'])
+            if attachinfo:
+                message += " %s" % (attachinfo)
+                self.criticals.append(message)
+            else:
+                self.warns.append(message)
+
 
 if __name__ == "__main__":
     # Instantiate the plugin, check it, and then exit

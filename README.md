@@ -72,7 +72,7 @@ Zone: us-east-1b
 
 [snipped advice section]
 
-jbrowne@aauadmin02:~/awstools$ ~/boto-dev/bin/python ./reserved-instances-check --itag=hostname --rdetail
+jbrowne@foo:~/awstools$ ~/boto-dev/bin/python ./reserved-instances-check --itag=hostname --rdetail
 Account: main
 
 Zone: us-east-1c
@@ -110,21 +110,13 @@ Account main Region us-east-1 unused elastic IPs:
 
 * availability-zones-check - NAGIOS plugin to WARN when availability zones are impaired
 
-First install pynagios and boto:
+First install pynagios and boto3:
 ```
 easy_install pynagios
-easy_install boto
+easy_install boto3
 ```
 
-Example output (boto < 2.2.2):
-```
-jbrowne@foo:~/awstools$ ./availability-zones-check
-WARN: us-east-1:us-east-1d state impaired
-jbrowne@foo:~/awstools$ echo $?
-1
-```
-
-Example output (boto >= 2.2.2):
+Example output:
 ```
 jbrowne@foo:~/awstools$ ./availability-zones-check
 WARN: us-east-1:us-east-1d state impaired ("We are continuing to work to recover the remaining EC2 instances, EBS volumes and ELBs.")

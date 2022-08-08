@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2012, 42Lines, Inc.
+# Copyright 2012-2022, 42Lines, Inc.
 # Original Author: Jim Browne
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,26 +19,66 @@
 #           not_before
 # TODO: Submit add_response, all_responses code to pynagios upstream
 
+from argparse import ArgumentParser
+import re
+
+import boto3
+import botocore
 import pynagios
-from pynagios import Plugin, make_option, Response
-import boto
-from boto.ec2 import regions
+from pynagios import Plugin, Response
+
+
+def tags_dict(tag_list):
+    '''
+    Put tags key value list into a dictionary.
+    '''
+    tags = {}
+    if tag_list is not None:
+        for tag in tag_list:
+            tags[tag['Key']] = tag['Value']
+
+    return tags
+
+
+def dict_to_boto3_filter_list(filters_dict):
+    '''
+        Convert a dict of filters to list of dicts that boto3 can use
+	    '''
+
+    filters_list = []
+    for key, value in filters_dict.items():
+        filter_dict = {'Name': key}
+        if isinstance(value, str):
+            filter_dict['Values'] = [value]
+        else:
+            filter_dict['Values'] = value
+
+        filters_list.append(filter_dict)
+
+    return filters_list
 
 
 class InstanceEventsCheck(Plugin):
 
     responses = []
+    session = None
+    ec2_client = None
 
-    region = make_option("--region",
-                         help="Region to check (default: us-east-1)",
-                         default=[],
-                         action="append")
-    allregions = make_option("--all",
-                             help="Check all regions",
-                             action="store_true")
-    tags = make_option("--tags",
-                       help="Instance tags to fetch for each instance",
-                       action="append")
+    parser = ArgumentParser(add_help=False)
+
+    parser.add_argument("--profile",
+                        help="AWS profile to use (default: none)",
+                        action="store")
+    parser.add_argument("--region",
+                        help="Region to check (default: us-east-1)",
+                        default=[],
+                        action="append")
+    parser.add_argument("--all",
+                        help="Check all regions",
+                        action="store_true")
+    parser.add_argument("--tags",
+                        help="Instance tags to fetch for each instance",
+                        action="append")
 
     def add_response(self, response):
         """
@@ -58,8 +98,8 @@ class InstanceEventsCheck(Plugin):
         if not self.responses:
             if default:
                 return default
-            else:
-                return Response(pynagios.OK)
+
+            return Response(pynagios.OK)
 
         self.responses.sort(reverse=True, key=lambda k: k.status.exit_code)
 
@@ -80,66 +120,104 @@ class InstanceEventsCheck(Plugin):
 
     def check(self):
 
+        self.session = boto3.Session(profile_name=self.options.profile)
+
         if not self.options.region:
             self.options.region = ["us-east-1"]
 
-        if self.options.allregions:
-            regs = regions()
+        if self.options.all:
+            check_regions = self.session.get_available_regions('ec2')
         else:
-            regs = []
-            for ropt in self.options.region:
-                for r in regions():
-                    if r.name == ropt:
-                        regs.append(r)
+            check_regions = []
+            for option_region in self.options.region:
+                for aws_region in self.session.get_available_regions('ec2'):
+                    if aws_region == option_region:
+                        check_regions.append(aws_region)
                         break
                 else:
-                    message = "Region %s not found." % ropt
+                    message = "Region %s not found." % option_region
                     return Response(pynagios.UNKNOWN, message)
 
-        for r in regs:
-            self.regioncheck(r)
+        for check_region in check_regions:
+            # Create client here to facilitate testing
+            self.ec2_client = self.session.client('ec2', region_name=check_region)
+            self.regioncheck(check_region)
 
-        names = [r.name for r in regs]
         default = Response(pynagios.OK, "Checked regions: " +
-                          ", ".join(names))
+                           ", ".join(check_regions))
 
         return self.all_responses(default)
 
+    def fetch_instance_info(self, region):
+        '''
+        Return AWS instance info.
+        '''
+        resource = self.session.resource('ec2', region_name=region)
+
+        instances = {}
+
+        try:
+            for instance in resource.instances.all():
+                if instance.state['Name'] != 'running':
+                    continue
+
+                if instance.platform:
+                    if instance.platform.lower() == 'windows':
+                        continue
+
+                tags = tags_dict(instance.tags)
+
+                instances[instance.instance_id] = {
+                    'info': instance,
+                    'tags': tags,
+                }
+        except botocore.exceptions.ClientError as error:
+            message = (
+                "Exception listing instances."
+                "  Bad credentials or disabled region (%s)?"
+                "  Error: %s"
+                ) % (region, error)
+            self.add_response(Response(pynagios.UNKNOWN, message))
+            return []
+
+        return instances
+
+
     def regioncheck(self, region):
+        '''Check given region for pending AWS instance events'''
 
-        import re
+        instance_info = self.fetch_instance_info(region)
+        if not instance_info:
+            return
 
-        ec2 = boto.connect_ec2(region=region)
-        reservations = ec2.get_all_instances()
-
-        instanceinfo = {}
         tags = self.options.tags if self.options.tags else []
 
-        # Collect the tag for every possible instance
-        for res in reservations:
-            for instance in res.instances:
-                iid = instance.id
-                instanceinfo[iid] = {}
-                for tag in tags:
-                    instanceinfo[iid][tag] = instance.tags.get(tag, '')
-                instanceinfo[iid]['dns'] = instance.public_dns_name
+        # No high level object in boto3 for instance status, so use client
+        ec2 = self.ec2_client
 
-        stats = ec2.get_all_instance_status()
+        paginator = ec2.get_paginator('describe_instance_status')
 
-        for stat in stats:
-            if stat.events:
-                for event in stat.events:
-                    completed = re.match('^\[Completed\]', event.description)
-                    canceled = re.match('^\[Canceled\]', event.description)
-                    if completed or canceled:
-                        continue
-                    status = pynagios.WARNING
-                    message = stat.id
-                    message += ":%s %s" % (event.code, event.description)
-                    message += " nb %s" % (event.not_before)
-                    for tag in tags:
-                        message += " %s:%s" % (tag, instanceinfo[stat.id][tag])
-                    self.add_response(Response(status, message))
+        for statuses in paginator.paginate():
+            for status in statuses['InstanceStatuses']:
+                if 'Events' in status:
+                    for event in status['Events']:
+                        completed = re.match(r'^\[Completed\]', event['Description'])
+                        canceled = re.match(r'^\[Canceled\]', event['Description'])
+
+                        if completed or canceled:
+                            continue
+
+                        nag_status = pynagios.WARNING
+                        instance_id = status['InstanceId']
+                        message = instance_id
+                        message += ":%s %s" % (event['Code'], event['Description'])
+                        message += " nb %s" % (event['NotBefore'])
+
+                        for tag in tags:
+                            if tag in instance_info[instance_id]['tags']:
+                                message += " %s:%s" % (tag, instance_info[instance_id]['tags'][tag])
+
+                        self.add_response(Response(nag_status, message))
 
 if __name__ == "__main__":
     # Instantiate the plugin, check it, and then exit

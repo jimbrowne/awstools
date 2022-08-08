@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
-# Copyright 2012, 42Lines, Inc.
+# Copyright 2012-2022, 42Lines, Inc.
 # Original Author: Jim Browne
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,81 +15,91 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from argparse import ArgumentParser
+
+import boto3
+import botocore
 import pynagios
-from pynagios import Plugin, make_option, Response
-import boto
-from boto.ec2 import regions
+from pynagios import Plugin, Response
 
 
 class AvailabilityZonesCheck(Plugin):
-    region = make_option("--region",
-                         help="Region to check (default: us-east-1)",
-                         default=[],
-                         action="append")
-    allregions = make_option("--all",
-                             help="Check all regions",
-                             action="store_true")
+    parser = ArgumentParser(add_help=False)
+
+    parser.add_argument("--profile",
+                        help="AWS profile to use (default: none)",
+                        action="store")
+    parser.add_argument("--region",
+                        help="Region to check (default: us-east-1)",
+                        default=[],
+                        action="append")
+    parser.add_argument("--all",
+                        help="Check all regions",
+                        action="store_true")
 
     responses = []
-    message_field = 0
+    include_message_field = False
+    session = None
+    ec2_client = None
+
 
     def check(self):
-        # Boto 2.2.2 and later has messages field in Zone
-        # Boto < 2.0 missing __version__, hence try/except
-        try:
-            from pkg_resources import parse_version
-            if parse_version(boto.__version__) >= parse_version('2.2.2'):
-                self.message_field = 1
-        except AttributeError:
-            pass
+        self.session = boto3.Session(profile_name=self.options.profile)
 
         if not self.options.region:
             self.options.region = ["us-east-1"]
 
-        if self.options.allregions:
-            regs = []
-            ec2_conn = boto.ec2.connection.EC2Connection()
-            for region in ec2_conn.get_all_regions():
-                regs.append(region)
+        if self.options.all:
+            check_regions = self.session.get_available_regions('ec2')
         else:
-            regs = []
-            for ropt in self.options.region:
-                for r in regions():
-                    if r.name == ropt:
-                        regs.append(r)
+            check_regions = []
+            for option_region in self.options.region:
+                for aws_region in self.session.get_available_regions('ec2'):
+                    if aws_region == option_region:
+                        check_regions.append(aws_region)
                         break
                 else:
-                    message = "Region %s not found." % ropt
+                    message = "Region %s not found." % option_region
                     return Response(pynagios.UNKNOWN, message)
 
-        for r in regs:
-            self.regioncheck(r)
+        for check_region in check_regions:
+            # Create client here to facilitate testing
+            self.ec2_client = self.session.client('ec2', region_name=check_region)
+            self.regioncheck(check_region)
 
-        if len(self.responses):
+        if self.responses:
             result = Response(pynagios.WARNING, ", ".join(self.responses))
         else:
-            names = [r.name for r in regs]
             result = Response(pynagios.OK, "Checked regions: " +
-                              ", ".join(names))
+                              ", ".join(check_regions))
         return result
 
     def regioncheck(self, region):
+        '''Check selected regions'''
 
-        ec2 = boto.connect_ec2(region=region)
-        zones = ec2.get_all_zones()
+        try:
+            zones = self.ec2_client.describe_availability_zones()
+        except botocore.exceptions.ClientError as error:
+            message = (
+                "Exception describing zones."
+                "  Bad credentials or disabled region (%s)?"
+                "  Error: %s"
+                ) % (region, error)
+            self.responses.append(message)
+            return
 
-        for zone in zones:
+        for zone in zones['AvailabilityZones']:
             if self.options.verbosity:
-                debug = "name %s state %s" % (zone.name, zone.state)
-                if self.message_field:
-                    debug += " message %s" % ("; ".join(zone.messages))
-                print debug
+                debug = "name %s state %s" % (zone['ZoneName'], zone['State'])
+                if self.include_message_field:
+                    debug += " message %s" % ("; ".join(zone['Messages']))
+                print(debug)
 
-            if zone.state != 'available':
-                message = "%s:%s" % (region.name, zone.name)
-                message += " state %s" % (zone.state)
-                if self.message_field:
-                    message += " (\"%s\")" % ("; ".join(zone.messages))
+            if zone['State'] != 'available':
+                message = "%s:%s" % (region, zone['ZoneName'])
+                message += " state %s" % (zone['State'])
+                if self.include_message_field:
+                    message += " (\"%s\")" % ("; ".join(zone['Messages']))
                 self.responses.append(message)
 
 
